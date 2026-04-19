@@ -5,7 +5,7 @@ dr <- default_date_range()
 
 app_ui <- function(request) {
   page_sidebar(
-    title = "Sovereign risk — economic news",
+    title = tr("RUS", "app_title"),
     theme = bs_theme(
       version = 5,
       bootswatch = "zephyr",
@@ -20,27 +20,18 @@ app_ui <- function(request) {
         choices = country_choices,
         options = list(
           placeholder = "Country name, ISO2 (BR), or ISO3 (BRA)",
-          maxOptions = 20
+          maxOptions = length(country_choices)
         )
       ),
       dateRangeInput(
         inputId = "date_range",
-        label = "Period",
+        label = paste0("Period (Maximum span: ", max_period_months(), " months)"),
         start = dr[["start"]],
         end = dr[["end"]],
-        max = Sys.Date()
-      ),
-      p(
-        class = "text-muted small",
-        paste0(
-          "Maximum span: ",
-          max_period_months(),
-          " months (~",
-          max_period_days(),
-          " days). Cache TTL: ",
-          round(news_cache_ttl_sec() / 3600, 1),
-          " h."
-        )
+        max = Sys.Date(),
+        format = ui_date_format(),
+        separator = " - ",
+        weekstart = 1
       ),
       actionButton("btn_last_6m", "Last 6 months", class = "btn-outline-secondary btn-sm w-100 mb-3"),
       checkboxInput("all_topics", "Search all topics", value = TRUE),
@@ -77,9 +68,13 @@ app_ui <- function(request) {
         max = limits$max,
         step = 1L
       ),
-      if (openai_has_api_key()) {
-        p(class = "text-muted small mb-2", "OpenAI key is set — requests use the live API (may take 1–3 minutes).")
-      } else {
+      selectInput(
+        inputId = "report_lang",
+        label = "Output report language",
+        choices = c("RUS", "ENG"),
+        selected = "RUS"
+      ),
+      if (!openai_has_api_key()) {
         p(
           class = "text-warning small mb-2",
           "OPENAI_API_KEY is not set — “Find news” cannot load results until the key is configured."
@@ -87,23 +82,82 @@ app_ui <- function(request) {
       },
       actionButton("run", "Find news", class = "btn-primary w-100")
     ),
-    card(
-      full_screen = TRUE,
-      card_header("Status"),
-      verbatimTextOutput("status", placeholder = TRUE)
+    tags$head(
+      tags$style(HTML(
+        ".results-panel, .export-panel { min-height: 32rem; }\
+         .export-panel {\
+           position: sticky;\
+           top: 1rem;\
+           align-self: start;\
+           max-height: calc(100vh - 2rem);\
+         }\
+         .status-panel-horizontal { min-height: 12rem; }\
+         .status-scroll { max-height: 14rem; overflow-y: auto; }\
+         .status-scroll pre { white-space: pre-wrap; word-break: break-word; }\
+         .results-scroll { min-height: 26rem; max-height: 70vh; overflow-y: auto; }\
+         .export-scroll { max-height: 70vh; overflow-y: auto; }\
+         .export-actions-sticky {\
+           position: sticky;\
+           top: 0;\
+           z-index: 5;\
+           background: var(--bs-body-bg);\
+           border-bottom: 1px solid var(--bs-border-color);\
+           padding-bottom: .75rem;\
+           margin-bottom: .75rem;\
+         }\
+         @media (max-width: 991.98px) {\
+           .export-panel {\
+             position: static;\
+             max-height: none;\
+           }\
+           .export-actions-sticky {\
+             position: sticky;\
+             bottom: 0;\
+             top: auto;\
+             border-top: 1px solid var(--bs-border-color);\
+             border-bottom: 0;\
+             margin-top: .75rem;\
+             margin-bottom: 0;\
+             padding-top: .75rem;\
+             padding-bottom: 0;\
+           }\
+         }\
+         .selectize-control .selectize-dropdown .selectize-dropdown-content {\
+           max-height: min(60vh, 24rem) !important;\
+           overflow-y: auto !important;\
+           overscroll-behavior: contain;\
+         }"
+      ))
+    ),
+    layout_columns(
+      col_widths = c(9, 3),
+      gap = "1rem",
+      fill = FALSE,
+      card(
+        class = "results-panel",
+        full_screen = TRUE,
+        card_header(textOutput("results_header", inline = TRUE)),
+        card_body(
+          class = "results-scroll",
+          uiOutput("results")
+        )
+      ),
+      card(
+        class = "export-panel",
+        card_header(textOutput("export_header", inline = TRUE)),
+        card_body(
+          class = "export-scroll",
+          uiOutput("export_controls")
+        )
+      )
     ),
     card(
+      class = "status-panel-horizontal mt-3",
       full_screen = TRUE,
-      card_header("Results"),
-      uiOutput("results")
-    ),
-    card(
-      card_header("Export"),
-      p(class = "text-muted small", "Download the last validated response (same data as the cards)."),
-      fluidRow(
-        column(4, downloadButton("export_json", "JSON", class = "btn-outline-secondary w-100")),
-        column(4, downloadButton("export_csv", "CSV", class = "btn-outline-secondary w-100")),
-        column(4, downloadButton("export_docx", "Word (DOCX)", class = "btn-outline-secondary w-100"))
+      card_header(textOutput("status_header", inline = TRUE)),
+      card_body(
+        class = "status-scroll",
+        verbatimTextOutput("status", placeholder = TRUE)
       )
     )
   )

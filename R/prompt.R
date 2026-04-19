@@ -57,7 +57,7 @@ topic_category_values <- c(
     "Все, что касается качества образования или долгосрочного качества человеческого капитала.\n\n",
     "6) Наиболее интересные новые научные или прикладные исследования по экономике страны. ",
     "Выход Article 4 IMF, выход специальных обзоров международных организаций, посвященных стране.\n\n",
-    "По умолчанию нужно отобрать около 15 новостей (если пользователь не задал другое N). ",
+    "По умолчанию нужно отобрать около 10 новостей (если пользователь не задал другое N). ",
     "Для каждой новости сделай численную оценку по шкале от 1 до 5 по следующим параметрам:\n\n",
     "1) Потенциальная важность для кредитоспособности\n",
     "2) Обсуждаемость или заметность\n",
@@ -166,6 +166,7 @@ format_follow_up_block_ru <- function(queries) {
 #' @param follow_up_enabled Whether follow-up list is active.
 #' @param search_language_phrase Russian phrase listing languages for search, e.g.
 #'   `"английском и португальском"`.
+#' @param report_language Output language for report text: `RUS` or `ENG`.
 #' @return Character scalar.
 build_sovereign_news_user_prompt <- function(country_iso3,
                                             country_display_name,
@@ -176,7 +177,8 @@ build_sovereign_news_user_prompt <- function(country_iso3,
                                             n_news = default_news_count(),
                                             follow_up_queries = character(),
                                             follow_up_enabled = TRUE,
-                                            search_language_phrase = "английском и основном языке (языках) страны") {
+                                            search_language_phrase = "английском и основном языке (языках) страны",
+                                            report_language = "RUS") {
   country_iso3 <- toupper(trimws(as.character(country_iso3)))
   country_display_name <- as.character(country_display_name)[1L]
   if (is.na(country_display_name) || !nzchar(country_display_name)) {
@@ -188,6 +190,10 @@ build_sovereign_news_user_prompt <- function(country_iso3,
   n_news <- as.integer(n_news)[1L]
   if (is.na(n_news) || n_news < 1L) {
     n_news <- default_news_count()
+  }
+  report_language <- toupper(trimws(as.character(report_language)[1L]))
+  if (!report_language %in% c("RUS", "ENG")) {
+    report_language <- "RUS"
   }
 
   topics_block <- format_topics_selection_ru(all_topics, topic_ids)
@@ -206,7 +212,15 @@ build_sovereign_news_user_prompt <- function(country_iso3,
     topics_block, "\n\n",
     fu, "\n\n",
     "Языки поиска: выполняй поиск на ", search_language_phrase, ".\n\n",
-    "Верни итог строго в JSON по заданной схеме; текстовые поля по сути должны быть на русском."
+    "Язык итогового отчета (поля title, what_happened и why_it_matters_for_sovereign_risk): ",
+    report_language, ". ",
+    if (identical(report_language, "ENG")) {
+      "Пиши эти текстовые поля полностью на английском; не используй кириллицу в title."
+    } else {
+      "Пиши эти текстовые поля на русском; title должен быть на русском (сложные термины можно оставить в оригинале в скобках)."
+    },
+    "\n\n",
+    "Верни итог строго в JSON по заданной схеме."
   )
 }
 
@@ -224,7 +238,8 @@ build_sovereign_news_prompt <- function(country_iso3,
                                        n_news = default_news_count(),
                                        follow_up_queries = character(),
                                        follow_up_enabled = TRUE,
-                                       search_language_phrase = "английском и основном языке (языках) страны") {
+                                       search_language_phrase = "английском и основном языке (языках) страны",
+                                       report_language = "RUS") {
   list(
     system = sovereign_news_system_prompt(),
     user = build_sovereign_news_user_prompt(
@@ -237,7 +252,8 @@ build_sovereign_news_prompt <- function(country_iso3,
       n_news = n_news,
       follow_up_queries = follow_up_queries,
       follow_up_enabled = follow_up_enabled,
-      search_language_phrase = search_language_phrase
+      search_language_phrase = search_language_phrase,
+      report_language = report_language
     )
   )
 }
@@ -292,7 +308,17 @@ build_sovereign_news_prompt <- function(country_iso3,
 }
 
 
-.json_schema_item <- function(composite_rank_max = NULL) {
+.json_schema_item <- function(composite_rank_max = NULL, report_language = "RUS") {
+  report_language <- toupper(trimws(as.character(report_language)[1L]))
+  if (!report_language %in% c("RUS", "ENG")) {
+    report_language <- "RUS"
+  }
+  title_description <- if (identical(report_language, "ENG")) {
+    "News title in English only (Latin script; no Cyrillic)."
+  } else {
+    "Заголовок новости на русском языке (допустимы оригинальные термины в скобках)."
+  }
+
   composite_rank_prop <- list(
     type = "integer",
     minimum = 1L,
@@ -305,7 +331,7 @@ build_sovereign_news_prompt <- function(country_iso3,
   list(
     type = "object",
     properties = list(
-      title = list(type = "string"),
+      title = list(type = "string", description = title_description),
       date = list(
         type = "string",
         description = "ISO date (YYYY-MM-DD) if possible; otherwise best-effort or empty string"
@@ -358,10 +384,13 @@ build_sovereign_news_prompt <- function(country_iso3,
 #'
 #' @param n Optional integer: fixes `items` array length in the schema (min/max).
 #' @return `list` suitable for `jsonlite::toJSON(..., auto_unbox = TRUE)`.
-news_response_json_schema <- function(n = NULL) {
+news_response_json_schema <- function(n = NULL, report_language = "RUS") {
   n <- if (is.null(n)) NULL else as.integer(n)[1L]
   n_ok <- !is.null(n) && !is.na(n) && n >= 1L
-  items_element_schema <- .json_schema_item(composite_rank_max = if (n_ok) n else NULL)
+  items_element_schema <- .json_schema_item(
+    composite_rank_max = if (n_ok) n else NULL,
+    report_language = report_language
+  )
 
   items_array_schema <- list(
     type = "array",
@@ -419,12 +448,14 @@ news_response_json_schema <- function(n = NULL) {
 #' @param name Schema name for the API (`name` field).
 #' @param n Optional item count constraint for `items`.
 #' @return Named list: `name`, `schema`, optionally `strict`.
-openai_news_response_format <- function(name = "sovereign_news_response", n = NULL) {
+openai_news_response_format <- function(name = "sovereign_news_response",
+                                        n = NULL,
+                                        report_language = "RUS") {
   list(
     type = "json_schema",
     json_schema = list(
       name = name,
-      schema = news_response_json_schema(n = n),
+      schema = news_response_json_schema(n = n, report_language = report_language),
       strict = TRUE
     )
   )
@@ -440,6 +471,11 @@ openai_news_response_format <- function(name = "sovereign_news_response", n = NU
 #' @return List for the `text` argument of [openai_responses_create()].
 openai_responses_news_text <- function(n = NULL,
                                        name = "sovereign_news_response",
-                                       strict = TRUE) {
-  openai_responses_text_json_schema(name, news_response_json_schema(n = n), strict = strict)
+                                       strict = TRUE,
+                                       report_language = "RUS") {
+  openai_responses_text_json_schema(
+    name,
+    news_response_json_schema(n = n, report_language = report_language),
+    strict = strict
+  )
 }

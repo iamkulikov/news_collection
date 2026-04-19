@@ -12,7 +12,8 @@ fetch_sovereign_news_response <- function(country_iso3,
                                          n_news,
                                          follow_up_enabled,
                                          follow_up_queries,
-                                         search_language_phrase = NULL) {
+                                         search_language_phrase = NULL,
+                                         report_language = "RUS") {
   key <- openai_api_key()
   if (is.na(key) || !nzchar(key)) {
     return(list(
@@ -40,6 +41,10 @@ fetch_sovereign_news_response <- function(country_iso3,
   if (is.na(n_news) || n_news < 1L) {
     n_news <- default_news_count()
   }
+  report_language <- toupper(trimws(as.character(report_language)[1L]))
+  if (!report_language %in% c("RUS", "ENG")) {
+    report_language <- "RUS"
+  }
 
   pr <- build_sovereign_news_prompt(
     country_iso3 = country_iso3,
@@ -51,10 +56,15 @@ fetch_sovereign_news_response <- function(country_iso3,
     n_news = n_news,
     follow_up_queries = follow_up_queries,
     follow_up_enabled = follow_up_enabled,
-    search_language_phrase = search_language_phrase
+    search_language_phrase = search_language_phrase,
+    report_language = report_language
   )
 
-  text_fmt <- openai_responses_news_text(n = n_news, strict = openai_json_schema_strict())
+  text_fmt <- openai_responses_news_text(
+    n = n_news,
+    strict = openai_json_schema_strict(),
+    report_language = report_language
+  )
 
   extra_body <- list(max_output_tokens = openai_max_output_tokens())
   tools <- if (isTRUE(openai_web_search_enabled())) {
@@ -75,7 +85,11 @@ fetch_sovereign_news_response <- function(country_iso3,
     parse_json = TRUE,
     json_repair_attempt = TRUE,
     validate_parsed_json = function(parsed) {
-      validate_news_response(parsed, n_expected = n_news)
+      validate_news_response(
+        parsed,
+        n_expected = n_news,
+        report_language = report_language
+      )
     },
     extra_body = extra_body
   )

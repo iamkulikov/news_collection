@@ -1,30 +1,6 @@
 # Render validated sovereign-news JSON to Shiny UI + CSV flattening for export.
 # Expects structure validated by `validate_news_response()` in R/schema.R.
 
-.topic_category_display_name <- function(cat) {
-  cat <- as.character(cat)[1L]
-  if (identical(cat, "follow_up_custom")) {
-    return("Follow-up (custom)")
-  }
-  w <- which(topic_choices == cat)
-  if (length(w) == 1L) {
-    return(names(topic_choices)[w])
-  }
-  cat
-}
-
-
-.origin_display_name <- function(origin) {
-  if (identical(origin, "base_search")) {
-    return("Base search")
-  }
-  if (identical(origin, "follow_up")) {
-    return("Follow-up")
-  }
-  as.character(origin)[1L]
-}
-
-
 .coerce_string_list <- function(x) {
   if (is.null(x)) {
     return(character())
@@ -91,7 +67,8 @@ sort_items_by_composite_rank <- function(items) {
 #'
 #' @param it Item list.
 #' @return Shiny tag list.
-news_item_card_ui <- function(it) {
+news_item_card_ui <- function(it, report_lang = "RUS") {
+  report_lang <- normalize_report_language(report_lang)
   sc <- it$scores
   c_imp <- .score_int(sc, "credit_importance")
   vis <- .score_int(sc, "visibility")
@@ -103,8 +80,8 @@ news_item_card_ui <- function(it) {
     NA_integer_
   }
 
-  topic_lab <- .topic_category_display_name(it$topic_category)
-  origin_lab <- .origin_display_name(it$origin)
+  topic_lab <- topic_display_name(it$topic_category, report_lang = report_lang)
+  origin_lab <- origin_display_name(it$origin, report_lang = report_lang)
   date_chr <- as.character(it$date)[1L]
   if (is.na(date_chr)) {
     date_chr <- ""
@@ -142,7 +119,7 @@ news_item_card_ui <- function(it) {
   }
 
   score_line <- sprintf(
-    "Credit importance: %s · Visibility: %s · Freshness: %s",
+    tr(report_lang, "score_line"),
     c_imp, vis, fr
   )
 
@@ -170,27 +147,27 @@ news_item_card_ui <- function(it) {
     ),
     card_body(
       tags$p(class = "small text-muted mb-2", score_line),
-      tags$h6(class = "text-uppercase small text-muted", "What happened"),
+      tags$h6(class = "text-uppercase small text-muted", tr(report_lang, "what_happened")),
       .format_multiline_text(it$what_happened),
-      tags$h6(class = "text-uppercase small text-muted mt-3", "Why it matters for sovereign risk"),
+      tags$h6(class = "text-uppercase small text-muted mt-3", tr(report_lang, "why_matters")),
       .format_multiline_text(it$why_it_matters_for_sovereign_risk),
-      tags$h6(class = "text-uppercase small text-muted mt-3", "Sources"),
+      tags$h6(class = "text-uppercase small text-muted mt-3", tr(report_lang, "sources")),
       if (length(link_items)) {
         tags$ul(class = "mb-0", link_items)
       } else {
-        tags$p(class = "text-muted mb-0", "No links.")
+        tags$p(class = "text-muted mb-0", tr(report_lang, "no_links"))
       },
       if (length(item_tag_list)) {
         tags$div(
           class = "mt-2",
-          tags$span(class = "small text-muted", "Tags: "),
+          tags$span(class = "small text-muted", tr(report_lang, "tags")),
           tags$span(class = "small", paste(item_tag_list, collapse = ", "))
         )
       },
       if (nzchar(notes)) {
         tags$div(
           class = "mt-2 small text-muted border-top pt-2",
-          tags$strong("Evidence quality: "),
+          tags$strong(tr(report_lang, "evidence_quality")),
           notes
         )
       }
@@ -203,9 +180,10 @@ news_item_card_ui <- function(it) {
 #'
 #' @param parsed Validated root object (`country`, `time_window`, `items`, ...).
 #' @return `shiny.tag` tree.
-render_news_response_ui <- function(parsed) {
+render_news_response_ui <- function(parsed, report_lang = "RUS") {
+  report_lang <- normalize_report_language(report_lang)
   if (is.null(parsed)) {
-    return(tags$p(class = "text-muted", "No run yet."))
+    return(tags$p(class = "text-muted", tr(report_lang, "no_run")))
   }
 
   co <- parsed$country
@@ -229,10 +207,10 @@ render_news_response_ui <- function(parsed) {
   )
 
   if (!length(items)) {
-    return(tags$div(meta, tags$div(class = "alert alert-info mb-0", "No news items in this response.")))
+    return(tags$div(meta, tags$div(class = "alert alert-info mb-0", tr(report_lang, "no_items"))))
   }
 
-  cards <- lapply(items, news_item_card_ui)
+  cards <- lapply(items, function(it) news_item_card_ui(it, report_lang = report_lang))
   tags$div(class = "news-results", meta, cards)
 }
 
@@ -382,19 +360,58 @@ build_empty_validated_news_response <- function(iso3, date_start, date_end, topi
 }
 
 
+.docx_font_family <- function() {
+  # Calibri is the primary requirement; Word will pick a local fallback (typically Arial) when unavailable.
+  "Calibri"
+}
+
+
+.docx_text_prop <- function(size = 11, bold = FALSE, italic = FALSE, underline = FALSE, color = "#000000") {
+  officer::fp_text(
+    font.size = size,
+    font.family = .docx_font_family(),
+    bold = bold,
+    italic = italic,
+    underlined = underline,
+    color = color
+  )
+}
+
+
+.docx_add_line <- function(doc, text, size = 11, bold = FALSE) {
+  p <- officer::fpar(
+    officer::ftext(as.character(text)[1L], prop = .docx_text_prop(size = size, bold = bold))
+  )
+  officer::body_add_fpar(doc, p, style = "Normal")
+}
+
+
+.docx_format_date <- function(x) {
+  x_chr <- as.character(x)[1L]
+  if (is.na(x_chr) || !nzchar(x_chr)) {
+    return("")
+  }
+  x_date <- suppressWarnings(as.Date(x_chr))
+  if (is.na(x_date)) {
+    return(x_chr)
+  }
+  format(x_date, "%d.%m.%Y")
+}
+
+
 .docx_add_text_block <- function(doc, label, body_text) {
-  doc <- officer::body_add_par(doc, label, style = "heading 3")
+  doc <- .docx_add_line(doc, label, size = 12, bold = TRUE)
   txt <- as.character(body_text)[1L]
   if (is.na(txt) || !nzchar(txt)) {
-    return(officer::body_add_par(doc, "—", style = "Normal"))
+    return(.docx_add_line(doc, "—"))
   }
   lines <- strsplit(txt, "\n", fixed = TRUE)[[1]]
   lines <- lines[nzchar(trimws(lines))]
   if (!length(lines)) {
-    return(officer::body_add_par(doc, "—", style = "Normal"))
+    return(.docx_add_line(doc, "—"))
   }
   for (ln in lines) {
-    doc <- officer::body_add_par(doc, ln, style = "Normal")
+    doc <- .docx_add_line(doc, ln)
   }
   doc
 }
@@ -405,7 +422,8 @@ build_empty_validated_news_response <- function(iso3, date_start, date_end, topi
 #' @param parsed Validated root list.
 #' @param path Destination `.docx` path.
 #' @return Invisibly `path`.
-write_news_response_docx <- function(parsed, path) {
+write_news_response_docx <- function(parsed, path, report_lang = "RUS") {
+  report_lang <- normalize_report_language(report_lang)
   if (is.null(parsed) || !is.list(parsed)) {
     stop("`parsed` must be a non-empty list.", call. = FALSE)
   }
@@ -418,13 +436,20 @@ write_news_response_docx <- function(parsed, path) {
   t1 <- if (is.list(tw)) as.character(tw$end)[1L] else ""
 
   doc <- officer::read_docx()
-  doc <- officer::body_add_par(doc, "Sovereign risk — economic news", style = "heading 1")
-  doc <- officer::body_add_par(
-    doc,
-    paste0(dname, " (", iso3, ") — period: ", t0, " → ", t1),
-    style = "Normal"
+  country_lab <- trimws(as.character(dname)[1L])
+  if (is.na(country_lab) || !nzchar(country_lab)) {
+    country_lab <- trimws(as.character(iso3)[1L])
+  }
+  period_start <- .docx_format_date(t0)
+  period_end <- .docx_format_date(t1)
+  header_line <- sprintf(
+    "%s Economic News - %s to %s",
+    country_lab,
+    period_start,
+    period_end
   )
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .docx_add_line(doc, header_line, size = 16, bold = TRUE)
+  doc <- .docx_add_line(doc, "")
 
   items <- parsed$items
   if (!is.list(items)) {
@@ -433,54 +458,55 @@ write_news_response_docx <- function(parsed, path) {
   items <- sort_items_by_composite_rank(items)
 
   if (!length(items)) {
-    doc <- officer::body_add_par(doc, "No news items in this response.", style = "Normal")
+    doc <- .docx_add_line(doc, tr(report_lang, "no_items"))
     print(doc, target = path)
     return(invisible(path))
   }
 
-  for (it in items) {
+  for (idx in seq_along(items)) {
+    it <- items[[idx]]
     title <- as.character(it$title)[1L]
-    doc <- officer::body_add_par(doc, title, style = "heading 2")
+    title_line <- sprintf("%d. %s", idx, title)
+    doc <- .docx_add_line(doc, title_line, size = 14, bold = TRUE)
 
     date_chr <- as.character(it$date)[1L]
     if (!is.na(date_chr) && nzchar(date_chr)) {
-      doc <- officer::body_add_par(doc, paste("Date:", date_chr), style = "Normal")
+      doc <- .docx_add_line(doc, paste(tr(report_lang, "date"), .docx_format_date(date_chr)))
     }
 
-    topic_lab <- .topic_category_display_name(it$topic_category)
-    origin_lab <- .origin_display_name(it$origin)
+    topic_lab <- topic_display_name(it$topic_category, report_lang = report_lang)
+    origin_lab <- origin_display_name(it$origin, report_lang = report_lang)
     cr <- it$composite_rank
     cr_txt <- if ((is.numeric(cr) || is.integer(cr)) && length(cr) == 1L && !is.na(cr)) {
-      paste0("Rank #", as.integer(round(as.numeric(cr))))
+      sprintf(tr(report_lang, "rank"), as.integer(round(as.numeric(cr))))
     } else {
       ""
     }
     meta_bits <- c(
-      paste("Topic:", topic_lab),
-      paste("Origin:", origin_lab),
+      paste(tr(report_lang, "topic"), topic_lab),
+      paste(tr(report_lang, "origin"), origin_lab),
       if (nzchar(cr_txt)) cr_txt
     )
-    doc <- officer::body_add_par(doc, paste(meta_bits, collapse = " · "), style = "Normal")
+    doc <- .docx_add_line(doc, paste(meta_bits, collapse = " · "))
 
     sc <- if (is.list(it)) it$scores else list()
-    doc <- officer::body_add_par(
+    doc <- .docx_add_line(
       doc,
       sprintf(
-        "Scores — credit importance: %s, visibility: %s, freshness: %s",
+        tr(report_lang, "scores"),
         .score_int(sc, "credit_importance"),
         .score_int(sc, "visibility"),
         .score_int(sc, "freshness")
-      ),
-      style = "Normal"
+      )
     )
 
-    doc <- .docx_add_text_block(doc, "What happened", it$what_happened)
-    doc <- .docx_add_text_block(doc, "Why it matters for sovereign risk", it$why_it_matters_for_sovereign_risk)
+    doc <- .docx_add_text_block(doc, tr(report_lang, "what_happened"), it$what_happened)
+    doc <- .docx_add_text_block(doc, tr(report_lang, "why_matters"), it$why_it_matters_for_sovereign_risk)
 
-    doc <- officer::body_add_par(doc, "Sources", style = "heading 3")
+    doc <- .docx_add_line(doc, tr(report_lang, "sources"), size = 12, bold = TRUE)
     src <- if (is.list(it)) it$sources else list()
     if (!is.list(src) || !length(src)) {
-      doc <- officer::body_add_par(doc, "No links.", style = "Normal")
+      doc <- .docx_add_line(doc, tr(report_lang, "no_links"))
     } else {
       for (s in src) {
         if (!is.list(s)) {
@@ -490,29 +516,43 @@ write_news_response_docx <- function(parsed, path) {
         nm <- as.character(s$source_name)[1L]
         pd <- s$published_date
         pd_chr <- if (!is.null(pd)) as.character(pd)[1L] else ""
-        line <- paste0(nm, " — ", url)
-        if (is.character(pd_chr) && nzchar(pd_chr) && !is.na(pd_chr)) {
-          line <- paste0(line, " (", pd_chr, ")")
+        if (is.na(url) || !nzchar(url)) {
+          next
         }
-        doc <- officer::body_add_par(doc, line, style = "Normal")
+        if (is.na(nm) || !nzchar(nm)) {
+          nm <- url
+        }
+        prefix <- if (is.character(pd_chr) && nzchar(pd_chr) && !is.na(pd_chr)) {
+          paste0(nm, " (", .docx_format_date(pd_chr), "): ")
+        } else {
+          paste0(nm, ": ")
+        }
+        source_par <- officer::fpar(
+          officer::ftext(prefix, prop = .docx_text_prop()),
+          officer::hyperlink_ftext(
+            text = url,
+            href = url,
+            prop = .docx_text_prop(color = "#0563C1", underline = TRUE)
+          )
+        )
+        doc <- officer::body_add_fpar(doc, source_par, style = "Normal")
       }
     }
 
     item_tag_list <- .coerce_string_list(if (is.list(it)) it$tags else NULL)
     if (length(item_tag_list)) {
-      doc <- officer::body_add_par(
+      doc <- .docx_add_line(
         doc,
-        paste("Tags:", paste(item_tag_list, collapse = ", ")),
-        style = "Normal"
+        paste(tr(report_lang, "tags"), paste(item_tag_list, collapse = ", "))
       )
     }
 
     notes <- as.character(it$notes_on_evidence_quality)[1L]
     if (!is.na(notes) && nzchar(notes)) {
-      doc <- officer::body_add_par(doc, paste("Evidence quality:", notes), style = "Normal")
+      doc <- .docx_add_line(doc, paste(tr(report_lang, "evidence_quality"), notes))
     }
 
-    doc <- officer::body_add_par(doc, "", style = "Normal")
+    doc <- .docx_add_line(doc, "")
   }
 
   print(doc, target = path)

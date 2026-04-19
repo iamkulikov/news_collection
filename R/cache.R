@@ -10,8 +10,9 @@
 #' @param follow_up_queries Character vector (order ignored).
 #' @param n Requested number of news items.
 #' @param model OpenAI model id.
+#' @param report_language Report language (`RUS`/`ENG`), included in the key.
 #' @return Character scalar: 64-char hex SHA-256.
-news_request_cache_key <- function(iso3, start, end, topics, follow_up_queries, n, model) {
+news_request_cache_key <- function(iso3, start, end, topics, follow_up_queries, n, model, report_language = "RUS") {
   iso3 <- toupper(trimws(as.character(iso3)))
   start <- as.character(as.Date(start))
   end <- as.character(as.Date(end))
@@ -21,15 +22,20 @@ news_request_cache_key <- function(iso3, start, end, topics, follow_up_queries, 
   fu <- fu[!is.na(fu) & nzchar(fu)]
   n <- as.integer(n)[1L]
   model <- as.character(model)[1L]
+  report_language <- toupper(trimws(as.character(report_language)[1L]))
+  if (!report_language %in% c("RUS", "ENG")) {
+    report_language <- "RUS"
+  }
   payload <- list(
-    v = 2L,
+    v = 3L,
     iso3 = iso3,
     start = start,
     end = end,
     topics = topics,
     follow_up = fu,
     n = n,
-    model = model
+    model = model,
+    report_language = report_language
   )
   digest::digest(payload, algo = "sha256")
 }

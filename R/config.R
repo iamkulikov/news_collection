@@ -3,7 +3,53 @@
 
 # `country_choices` is defined in R/countries.R (must be sourced before this file).
 
-default_news_count <- function() 15L
+default_news_count <- function() 10L
+
+ui_date_format <- function() {
+  "dd.mm.yyyy"
+}
+
+parse_ui_date <- function(x) {
+  if (inherits(x, "Date")) {
+    return(x[1L])
+  }
+  if (is.null(x) || !length(x)) {
+    return(as.Date(NA))
+  }
+  xs <- trimws(as.character(x)[1L])
+  if (!nzchar(xs)) {
+    return(as.Date(NA))
+  }
+
+  parsed <- tryCatch(
+    suppressWarnings(as.Date(xs)),
+    error = function(e) as.Date(NA)
+  )
+  if (!is.na(parsed)) {
+    return(parsed)
+  }
+
+  parsed <- tryCatch(
+    suppressWarnings(as.Date(xs, format = "%d.%m.%Y")),
+    error = function(e) as.Date(NA)
+  )
+  if (!is.na(parsed)) {
+    return(parsed)
+  }
+
+  tryCatch(
+    suppressWarnings(as.Date(xs, format = "%d-%m-%Y")),
+    error = function(e) as.Date(NA)
+  )
+}
+
+format_ui_date <- function(x) {
+  d <- parse_ui_date(x)
+  if (is.na(d)) {
+    return("")
+  }
+  format(d, "%d.%m.%Y")
+}
 
 news_count_limits <- function() {
   list(min = 5L, max = 50L)
@@ -67,8 +113,8 @@ validate_period_span <- function(start, end) {
   if (is.null(start) || is.null(end)) {
     return(list(ok = FALSE, errors = "Period dates are missing."))
   }
-  ds <- tryCatch(as.Date(start), error = function(e) NA)
-  de <- tryCatch(as.Date(end), error = function(e) NA)
+  ds <- parse_ui_date(start)
+  de <- parse_ui_date(end)
   if (any(is.na(c(ds, de)))) {
     return(list(ok = FALSE, errors = "Period dates are invalid."))
   }

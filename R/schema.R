@@ -12,6 +12,33 @@ VALID_TOPICS_FIELD_VALUES <- setdiff(VALID_TOPIC_CATEGORIES, "follow_up_custom")
   is.character(x) && length(x) == 1L && !is.na(x)
 }
 
+.contains_cyrillic <- function(x) {
+  .is_nonempty_string(x) && grepl("[А-Яа-яЁё]", x, perl = TRUE)
+}
+
+.contains_latin <- function(x) {
+  .is_nonempty_string(x) && grepl("[A-Za-z]", x, perl = TRUE)
+}
+
+# Heuristic language gate for `items[].title`.
+# ENG must not contain Cyrillic and should contain at least one Latin character.
+# RUS must contain at least one Cyrillic character.
+.title_matches_report_language <- function(title, report_language) {
+  rl <- toupper(trimws(as.character(report_language)[1L]))
+  if (!rl %in% c("RUS", "ENG")) {
+    rl <- "RUS"
+  }
+  if (!.is_nonempty_string(title)) {
+    return(FALSE)
+  }
+  has_cyr <- .contains_cyrillic(title)
+  has_lat <- .contains_latin(title)
+  if (identical(rl, "ENG")) {
+    return(!has_cyr && has_lat)
+  }
+  has_cyr
+}
+
 .is_url_like <- function(x) {
   if (!.is_nonempty_string(x)) return(FALSE)
   grepl("^https?://[^[:space:]]+", x, ignore.case = TRUE)
@@ -22,7 +49,11 @@ VALID_TOPICS_FIELD_VALUES <- setdiff(VALID_TOPIC_CATEGORIES, "follow_up_custom")
 #' @param parsed R object (typically a `list`).
 #' @param n_expected Optional integer: required length of `items` (same as request `N`).
 #' @return Named list: `ok` (logical), `errors` (character vector, empty if ok).
-validate_news_response <- function(parsed, n_expected = NULL) {
+validate_news_response <- function(parsed, n_expected = NULL, report_language = "RUS") {
+  report_language <- toupper(trimws(as.character(report_language)[1L]))
+  if (!report_language %in% c("RUS", "ENG")) {
+    report_language <- "RUS"
+  }
   errs <- character()
 
   push <- function(...) {
@@ -118,7 +149,15 @@ validate_news_response <- function(parsed, n_expected = NULL) {
     if (length(miss_i)) {
       push("%s: missing keys: %s", pref, paste(miss_i, collapse = ", "))
     }
-    if (!.is_nonempty_string(it$title)) push("%s.title must be a non-empty string.", pref)
+    if (!.is_nonempty_string(it$title)) {
+      push("%s.title must be a non-empty string.", pref)
+    } else if (!.title_matches_report_language(it$title, report_language = report_language)) {
+      if (identical(report_language, "ENG")) {
+        push("%s.title must be in English (Latin script, no Cyrillic).", pref)
+      } else {
+        push("%s.title must be in Russian (must include Cyrillic).", pref)
+      }
+    }
     if (!is.character(it$date) || length(it$date) != 1L || is.na(it$date)) {
       push("%s.date must be a string.", pref)
     }
