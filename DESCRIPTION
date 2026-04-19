@@ -1,0 +1,11 @@
+Package: news.collection
+Title: Sovereign risk news (Shiny)
+Version: 0.0.1
+Encoding: UTF-8
+Imports:
+    bslib,
+    countrycode,
+    jsonlite,
+    shiny
+URL: https://github.com/iamkulikov/news.collection
+BugReports: https://github.com/iamkulikov/news.collection/issues
