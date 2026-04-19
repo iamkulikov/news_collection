@@ -30,6 +30,18 @@ app_ui <- function(request) {
         end = dr[["end"]],
         max = Sys.Date()
       ),
+      p(
+        class = "text-muted small",
+        paste0(
+          "Maximum span: ",
+          max_period_months(),
+          " months (~",
+          max_period_days(),
+          " days). Cache TTL: ",
+          round(news_cache_ttl_sec() / 3600, 1),
+          " h."
+        )
+      ),
       actionButton("btn_last_6m", "Last 6 months", class = "btn-outline-secondary btn-sm w-100 mb-3"),
       checkboxInput("all_topics", "Search all topics", value = TRUE),
       conditionalPanel(
@@ -65,6 +77,14 @@ app_ui <- function(request) {
         max = limits$max,
         step = 1L
       ),
+      if (openai_has_api_key()) {
+        p(class = "text-muted small mb-2", "OpenAI key is set — requests use the live API (may take 1–3 minutes).")
+      } else {
+        p(
+          class = "text-warning small mb-2",
+          "OPENAI_API_KEY is not set — “Find news” cannot load results until the key is configured."
+        )
+      },
       actionButton("run", "Find news", class = "btn-primary w-100")
     ),
     card(
@@ -79,8 +99,12 @@ app_ui <- function(request) {
     ),
     card(
       card_header("Export"),
-      p(class = "text-muted small", "Stub download until pipeline is wired."),
-      downloadButton("export_json", "Download last response (JSON stub)", class = "btn-outline-secondary")
+      p(class = "text-muted small", "Download the last validated response (same data as the cards)."),
+      fluidRow(
+        column(4, downloadButton("export_json", "JSON", class = "btn-outline-secondary w-100")),
+        column(4, downloadButton("export_csv", "CSV", class = "btn-outline-secondary w-100")),
+        column(4, downloadButton("export_docx", "Word (DOCX)", class = "btn-outline-secondary w-100"))
+      )
     )
   )
 }
