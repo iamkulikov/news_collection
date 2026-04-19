@@ -20,11 +20,7 @@ The app helps build a structured news brief for sovereign risk analysis: - choos
 
 ## Screenshots
 
-Minimal placeholders (you can replace these files with real assets anytime):
-
-![App screenshot](docs/screenshot.png)
-
-![App demo](docs/demo.gif)
+![App screenshot](assets/screen1.jpg)
 
 ## Tech stack
 
