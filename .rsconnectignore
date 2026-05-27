@@ -1,0 +1,21 @@
+# Paths excluded from the Posit Connect / rsconnect upload bundle (not from git).
+
+# Development archive (tests, docs, shinyapps guide, screenshot)
+archive/
+
+# Deploy docs (read on GitHub; not needed at runtime)
+deploy/
+
+# Repo / IDE / secrets
+.git/
+.Rproj.user/
+*.Rproj
+.Renviron
+.Rprofile
+.Rhistory
+.RData
+.cursor/
+.vscode/
+
+# README is not required to run the Shiny app
+README.md

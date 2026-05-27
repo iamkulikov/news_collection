@@ -52,7 +52,7 @@ format_ui_date <- function(x) {
 }
 
 news_count_limits <- function() {
-  list(min = 5L, max = 50L)
+  list(min = 1L, max = 50L)
 }
 
 #' Maximum allowed span of the news search period (calendar approximation).
@@ -106,6 +106,26 @@ validate_news_count_input <- function(n) {
   list(ok = TRUE, n = ni, errors = character())
 }
 
+default_country_choice <- function() {
+  country_values <- unname(as.character(country_choices))
+  if ("RUS" %in% country_values) {
+    return("RUS")
+  }
+  NULL
+}
+
+progress_eta_seconds_per_item <- function() {
+  16.4
+}
+
+estimate_run_duration_sec <- function(n_news = default_news_count()) {
+  n <- suppressWarnings(as.integer(n_news)[1L])
+  if (is.na(n) || n < 1L) {
+    n <- default_news_count()
+  }
+  as.numeric(progress_eta_seconds_per_item()) * n
+}
+
 #' Validate date range span against [max_period_days()].
 #'
 #' @return `list(ok, errors)`; `errors` empty if ok.
@@ -156,6 +176,10 @@ openai_api_key <- function() {
 openai_default_model <- function() {
   m <- Sys.getenv("OPENAI_MODEL", "gpt-5.4")
   if (!nzchar(m)) "gpt-5.4" else m
+}
+
+openai_model_label <- function() {
+  paste0("OpenAI · ", openai_default_model())
 }
 
 openai_http_timeout_sec <- function() {

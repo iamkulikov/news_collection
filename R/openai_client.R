@@ -228,6 +228,36 @@ openai_responses_parse_json_text <- function(text) {
   paste0("OpenAI request could not complete: ", m, hint)
 }
 
+openai_failure_kind <- function(status = NULL, error_message = NULL, repair_attempted = FALSE) {
+  st <- suppressWarnings(as.integer(status)[1L])
+  if (length(st) != 1L || is.na(st)) {
+    st <- NA_integer_
+  }
+  msg <- tolower(trimws(as.character(error_message %||% "")[1L]))
+
+  if ((!is.na(st) && st == 429L) || grepl("429|too many requests|rate limited", msg, perl = TRUE)) {
+    return("rate_limit")
+  }
+  if (grepl("timed out|timeout|timeout was reached|taking too long", msg, ignore.case = TRUE)) {
+    return("timeout")
+  }
+  if ((!is.na(st) && st %in% c(401L, 403L)) ||
+      grepl("api key is not set|not have access|not allowed|unauthorized|forbidden|account access", msg, ignore.case = TRUE)) {
+    return("access")
+  }
+  if (grepl(
+    "could not resolve|connection refused|failed to connect|ssl|certificate|internet connection|proxy|vpn|firewall|tls",
+    msg,
+    ignore.case = TRUE
+  )) {
+    return("network")
+  }
+  if (isTRUE(repair_attempted) && grepl("after repair|repair request failed|repair http error|repair", msg, ignore.case = TRUE)) {
+    return("repair_failed")
+  }
+  "generic"
+}
+
 #' Create a response via `POST /v1/responses`.
 #'
 #' Uses `OPENAI_API_KEY`, optional `OPENAI_MODEL`, `OPENAI_TIMEOUT_SEC`,
@@ -250,6 +280,8 @@ openai_responses_parse_json_text <- function(text) {
 #'   (see [validate_news_response()]). When `ok` is `FALSE`, the result is treated like a failed parse
 #'   and triggers the same single repair attempt when `json_repair_attempt` is `TRUE`.
 #' @param extra_body Additional named list merged into the JSON body (last wins on duplicate names).
+#' @param progress_callback Optional function invoked as `progress_callback(event, payload)` for
+#'   coarse non-streaming progress updates such as `request_started` or `repair_started`.
 #'
 #' @return A list: `ok`, `status`, `body`, `output_text`, `parsed_json`, `parse_error`,
 #'   `error` (character or `NULL`), `response` (httr2 response on success path, or last error path),
@@ -267,7 +299,8 @@ openai_responses_create <- function(instructions = NULL,
                                    parse_json = FALSE,
                                    json_repair_attempt = FALSE,
                                    validate_parsed_json = NULL,
-                                   extra_body = NULL) {
+                                   extra_body = NULL,
+                                   progress_callback = NULL) {
   if (missing(input) || is.null(input)) {
     stop("`input` is required.", call. = FALSE)
   }
@@ -303,6 +336,15 @@ openai_responses_create <- function(instructions = NULL,
     }
   )
 
+  emit_progress <- function(event, payload = list()) {
+    if (!is.function(progress_callback)) {
+      return(invisible(NULL))
+    }
+    try(progress_callback(event, payload), silent = TRUE)
+    invisible(NULL)
+  }
+
+  emit_progress("request_started", list(phase = "main"))
   resp <- tryCatch(
     httr2::req_perform(req),
     error = function(e) {
@@ -445,6 +487,7 @@ openai_responses_create <- function(instructions = NULL,
       }
     )
 
+    emit_progress("repair_started", list(phase = "repair", reason = pj_err %||% "unknown"))
     resp2 <- tryCatch(
       httr2::req_perform(req2),
       error = function(e) {

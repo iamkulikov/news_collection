@@ -63,6 +63,71 @@ sort_items_by_composite_rank <- function(items) {
 }
 
 
+.coerce_event_stage_list <- function(x) {
+  if (!is.list(x) || !length(x)) {
+    return(list())
+  }
+  out <- lapply(x, function(stage) {
+    if (!is.list(stage)) {
+      return(NULL)
+    }
+    date_chr <- as.character(stage$date)[1L]
+    stage_chr <- as.character(stage$stage)[1L]
+    if (is.na(date_chr)) {
+      date_chr <- ""
+    }
+    if (is.na(stage_chr) || !nzchar(trimws(stage_chr))) {
+      return(NULL)
+    }
+    list(date = date_chr, stage = stage_chr)
+  })
+  out[!vapply(out, is.null, logical(1))]
+}
+
+
+.format_event_stage_text <- function(stage, date_formatter = identity) {
+  if (!is.list(stage)) {
+    return("")
+  }
+  date_chr <- as.character(stage$date)[1L]
+  stage_chr <- as.character(stage$stage)[1L]
+  if (is.na(date_chr)) {
+    date_chr <- ""
+  }
+  if (is.na(stage_chr)) {
+    stage_chr <- ""
+  }
+  if (!nzchar(date_chr)) {
+    return(stage_chr)
+  }
+  paste0(date_formatter(date_chr), " — ", stage_chr)
+}
+
+
+.collapse_event_stages_text <- function(stages, date_formatter = identity) {
+  if (!length(stages)) {
+    return("")
+  }
+  paste(vapply(stages, .format_event_stage_text, character(1), date_formatter = date_formatter), collapse = " | ")
+}
+
+
+.event_stages_json_string <- function(stages) {
+  if (!length(stages)) {
+    return("[]")
+  }
+  jsonlite::toJSON(stages, auto_unbox = TRUE, null = "null")
+}
+
+
+.topic_badge_class <- function(topic_category) {
+  topic_id <- as.character(topic_category)[1L]
+  topic_id <- if (is.na(topic_id) || !nzchar(topic_id)) "default" else topic_id
+  normalized_id <- gsub("[^a-z0-9]+", "-", tolower(topic_id))
+  paste("topic-badge", paste0("topic-badge--", normalized_id))
+}
+
+
 #' Build Shiny UI for one news item card (bslib).
 #'
 #' @param it Item list.
@@ -81,7 +146,6 @@ news_item_card_ui <- function(it, report_lang = "RUS") {
   }
 
   topic_lab <- topic_display_name(it$topic_category, report_lang = report_lang)
-  origin_lab <- origin_display_name(it$origin, report_lang = report_lang)
   date_chr <- as.character(it$date)[1L]
   if (is.na(date_chr)) {
     date_chr <- ""
@@ -89,6 +153,7 @@ news_item_card_ui <- function(it, report_lang = "RUS") {
 
   src <- it$sources
   src_list <- if (is.list(src)) src else list()
+  event_stage_list <- .coerce_event_stage_list(it$event_stages)
 
   link_items <- lapply(seq_along(src_list), function(k) {
     s <- src_list[[k]]
@@ -140,8 +205,7 @@ news_item_card_ui <- function(it, report_lang = "RUS") {
           if (!is.na(cr_lab)) {
             tags$span(class = "badge bg-primary me-1", paste0("#", cr_lab))
           },
-          tags$span(class = "badge bg-secondary me-1", topic_lab),
-          tags$span(class = "badge bg-info text-dark", origin_lab)
+          tags$span(class = paste("badge me-1", .topic_badge_class(it$topic_category)), topic_lab)
         )
       )
     ),
@@ -149,6 +213,15 @@ news_item_card_ui <- function(it, report_lang = "RUS") {
       tags$p(class = "small text-muted mb-2", score_line),
       tags$h6(class = "text-uppercase small text-muted", tr(report_lang, "what_happened")),
       .format_multiline_text(it$what_happened),
+      if (length(event_stage_list)) {
+        tagList(
+          tags$h6(class = "text-uppercase small text-muted mt-3", tr(report_lang, "event_stages")),
+          tags$ul(
+            class = "mb-0 ps-3",
+            lapply(event_stage_list, function(stage) tags$li(.format_event_stage_text(stage)))
+          )
+        )
+      },
       tags$h6(class = "text-uppercase small text-muted mt-3", tr(report_lang, "why_matters")),
       .format_multiline_text(it$why_it_matters_for_sovereign_risk),
       tags$h6(class = "text-uppercase small text-muted mt-3", tr(report_lang, "sources")),
@@ -256,6 +329,9 @@ news_response_to_csv_df <- function(parsed) {
       composite_rank = integer(),
       title = character(),
       date = character(),
+      event_stages_count = integer(),
+      event_stages_text = character(),
+      event_stages_json = character(),
       topic_category = character(),
       origin = character(),
       score_credit_importance = integer(),
@@ -278,6 +354,7 @@ news_response_to_csv_df <- function(parsed) {
     it <- items[[j]]
     sc <- if (is.list(it)) it$scores else list()
     src <- if (is.list(it) && is.list(it$sources)) it$sources else list()
+    event_stage_list <- .coerce_event_stage_list(if (is.list(it)) it$event_stages else NULL)
     urls <- vapply(src, function(s) {
       if (!is.list(s)) {
         return("")
@@ -310,6 +387,9 @@ news_response_to_csv_df <- function(parsed) {
       },
       title = as.character(it$title)[1L],
       date = as.character(it$date)[1L],
+      event_stages_count = length(event_stage_list),
+      event_stages_text = .collapse_event_stages_text(event_stage_list),
+      event_stages_json = .event_stages_json_string(event_stage_list),
       topic_category = as.character(it$topic_category)[1L],
       origin = as.character(it$origin)[1L],
       score_credit_importance = .score_int(sc, "credit_importance"),
@@ -417,6 +497,22 @@ build_empty_validated_news_response <- function(iso3, date_start, date_end, topi
 }
 
 
+.docx_add_event_stages <- function(doc, stages, report_lang = "RUS") {
+  stage_list <- .coerce_event_stage_list(stages)
+  doc <- .docx_add_line(doc, tr(report_lang, "event_stages"), size = 12, bold = TRUE)
+  if (!length(stage_list)) {
+    return(.docx_add_line(doc, "—"))
+  }
+  for (stage in stage_list) {
+    doc <- .docx_add_line(
+      doc,
+      paste0("- ", .format_event_stage_text(stage, date_formatter = .docx_format_date))
+    )
+  }
+  doc
+}
+
+
 #' Write validated news response to a Word (.docx) file (same content as cards/CSV).
 #'
 #' @param parsed Validated root list.
@@ -501,6 +597,7 @@ write_news_response_docx <- function(parsed, path, report_lang = "RUS") {
     )
 
     doc <- .docx_add_text_block(doc, tr(report_lang, "what_happened"), it$what_happened)
+    doc <- .docx_add_event_stages(doc, if (is.list(it)) it$event_stages else NULL, report_lang = report_lang)
     doc <- .docx_add_text_block(doc, tr(report_lang, "why_matters"), it$why_it_matters_for_sovereign_risk)
 
     doc <- .docx_add_line(doc, tr(report_lang, "sources"), size = 12, bold = TRUE)

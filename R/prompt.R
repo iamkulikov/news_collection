@@ -78,6 +78,15 @@ topic_category_values <- c(
     "Помимо связного текста на русском ты обязан вернуть валидируемый JSON строго по схеме, ",
     "которую мы задаем через structured output / JSON Schema на стороне клиента. ",
     "Поле items должно содержать ровно N элементов (N задается пользователем). ",
+    "Каждый элемент items должен описывать один сюжет / storyline, а не одну отдельную статью. ",
+    "Если ты находишь несколько апдейтов по одному и тому же объекту, решению, переговорам, выпуску долга, санкционному треку или другому общему событию, ",
+    "объедини их в один item и не дублируй сюжет несколькими почти одинаковыми карточками. ",
+    "Для такого агрегированного item используй общий заголовок сюжета, а не заголовок одной публикации. ",
+    "Поле date на верхнем уровне должно быть датой последнего этапа сюжета. ",
+    "Поле event_stages обязательно: это хронологический список этапов сюжета вида {date, stage}, отсортированный от более ранних этапов к более поздним. ",
+    "Даже если у сюжета по сути один значимый апдейт, все равно верни минимум один элемент в event_stages. ",
+    "Поле what_happened должно кратко суммировать весь сюжет и его текущий статус, а не пересказывать одну статью. ",
+    "Поле why_it_matters_for_sovereign_risk должно объяснять значимость для суверенного риска на уровне всего сюжета. ",
     "Каждый элемент должен включать оценки scores с целыми числами 1–5: ",
     "credit_importance (важность для кредитоспособности), visibility (обсуждаемость/заметность), freshness (свежесть). ",
     "Поле topic_category должно соответствовать одной из категорий таксономии (либо follow_up_custom, если событие пришло ",
@@ -87,6 +96,7 @@ topic_category_values <- c(
     "Ранги должны быть согласованы с сортировкой items (без пропусков и дубликатов). ",
     "Для каждой новости укажи origin: base_search или follow_up. ",
     "Источники sources: 2–6 записей; в каждой обязательны url, source_name и published_date (ISO YYYY-MM-DD или пустая строка, если дата неизвестна). ",
+    "Подбирай sources так, чтобы они по возможности покрывали разные этапы event_stages, а не только финальный апдейт. ",
     "Не выдумывай URL: используй реальные ссылки, которые ты нашел в ходе поиска с инструментами провайдера."
   )
 }
@@ -147,7 +157,7 @@ format_follow_up_block_ru <- function(queries) {
   lines <- paste0("- ", queries, collapse = "\n")
   paste0(
     "Пользователь просит отдельно проверить обновления по следующим ранее актуальным сюжетам. ",
-    "Оцени их по тем же шкалам 1–5 и включи в общий список (без дублирования одного и того же события), ",
+    "Оцени их по тем же шкалам 1–5 и включи в общий список (без дублирования одного и того же события; несколько апдейтов по одному сюжету объединяй в один item), ",
     "с origin=follow_up, если новость относится именно к этому треку:\n",
     lines
   )
@@ -308,6 +318,25 @@ build_sovereign_news_prompt <- function(country_iso3,
 }
 
 
+.json_schema_event_stage <- function() {
+  list(
+    type = "object",
+    properties = list(
+      date = list(
+        type = "string",
+        description = "ISO date (YYYY-MM-DD) for this stage if known; otherwise empty string"
+      ),
+      stage = list(
+        type = "string",
+        description = "Short description of this storyline stage or update"
+      )
+    ),
+    required = list("date", "stage"),
+    additionalProperties = FALSE
+  )
+}
+
+
 .json_schema_item <- function(composite_rank_max = NULL, report_language = "RUS") {
   report_language <- toupper(trimws(as.character(report_language)[1L]))
   if (!report_language %in% c("RUS", "ENG")) {
@@ -334,7 +363,14 @@ build_sovereign_news_prompt <- function(country_iso3,
       title = list(type = "string", description = title_description),
       date = list(
         type = "string",
-        description = "ISO date (YYYY-MM-DD) if possible; otherwise best-effort or empty string"
+        description = "Latest known storyline date / last event stage date (ISO YYYY-MM-DD if possible; otherwise best-effort or empty string)"
+      ),
+      event_stages = list(
+        type = "array",
+        minItems = 1L,
+        maxItems = 6L,
+        description = "Chronological storyline stages from earliest to latest",
+        items = .json_schema_event_stage()
       ),
       what_happened = list(type = "string"),
       why_it_matters_for_sovereign_risk = list(type = "string"),
@@ -363,6 +399,7 @@ build_sovereign_news_prompt <- function(country_iso3,
     required = list(
       "title",
       "date",
+      "event_stages",
       "what_happened",
       "why_it_matters_for_sovereign_risk",
       "topic_category",

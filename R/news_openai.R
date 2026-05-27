@@ -3,7 +3,8 @@
 
 #' Run the full model request: system + user prompts, optional web search, strict JSON schema.
 #'
-#' @return `list(ok, error, parsed, usage)` where `parsed` is validated news JSON on success.
+#' @param progress_callback Optional function invoked for coarse progress events from the OpenAI client.
+#' @return `list(ok, error, parsed, usage, telemetry)` where `parsed` is validated news JSON on success.
 fetch_sovereign_news_response <- function(country_iso3,
                                          date_start,
                                          date_end,
@@ -13,7 +14,8 @@ fetch_sovereign_news_response <- function(country_iso3,
                                          follow_up_enabled,
                                          follow_up_queries,
                                          search_language_phrase = NULL,
-                                         report_language = "RUS") {
+                                         report_language = "RUS",
+                                         progress_callback = NULL) {
   key <- openai_api_key()
   if (is.na(key) || !nzchar(key)) {
     return(list(
@@ -23,7 +25,12 @@ fetch_sovereign_news_response <- function(country_iso3,
         "(restart the R session after changing)."
       ),
       parsed = NULL,
-      usage = NULL
+      usage = NULL,
+      telemetry = list(
+        repair_attempted = FALSE,
+        web_search_used = FALSE,
+        error_kind = "access"
+      )
     ))
   }
 
@@ -91,7 +98,14 @@ fetch_sovereign_news_response <- function(country_iso3,
         report_language = report_language
       )
     },
-    extra_body = extra_body
+    extra_body = extra_body,
+    progress_callback = progress_callback
+  )
+
+  telemetry <- list(
+    repair_attempted = isTRUE(res$repair_attempted),
+    web_search_used = !is.null(tools),
+    error_kind = NA_character_
   )
 
   if (!isTRUE(res$ok)) {
@@ -99,8 +113,25 @@ fetch_sovereign_news_response <- function(country_iso3,
     if (is.null(err) || !nzchar(as.character(err))) {
       err <- sprintf("OpenAI error (HTTP %s)", res$status %||% "?")
     }
-    return(list(ok = FALSE, error = err, parsed = res$parsed_json, usage = res$usage))
+    telemetry$error_kind <- openai_failure_kind(
+      status = res$status,
+      error_message = err,
+      repair_attempted = isTRUE(res$repair_attempted)
+    )
+    return(list(
+      ok = FALSE,
+      error = err,
+      parsed = res$parsed_json,
+      usage = res$usage,
+      telemetry = telemetry
+    ))
   }
 
-  list(ok = TRUE, error = NULL, parsed = res$parsed_json, usage = res$usage)
+  list(
+    ok = TRUE,
+    error = NULL,
+    parsed = res$parsed_json,
+    usage = res$usage,
+    telemetry = telemetry
+  )
 }

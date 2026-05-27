@@ -6,9 +6,12 @@ Imports:
     bslib,
     countrycode,
     digest,
+    future,
     httr2,
     jsonlite,
+    later,
     officer,
+    promises,
     shiny
 Suggests:
     htmltools,

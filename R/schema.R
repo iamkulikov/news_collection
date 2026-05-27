@@ -12,6 +12,16 @@ VALID_TOPICS_FIELD_VALUES <- setdiff(VALID_TOPIC_CATEGORIES, "follow_up_custom")
   is.character(x) && length(x) == 1L && !is.na(x)
 }
 
+.is_scalar_string <- function(x) {
+  is.character(x) && length(x) == 1L && !is.na(x)
+}
+
+.is_iso_date_string <- function(x) {
+  .is_scalar_string(x) &&
+    grepl("^\\d{4}-\\d{2}-\\d{2}$", x) &&
+    !is.na(suppressWarnings(as.Date(x)))
+}
+
 .contains_cyrillic <- function(x) {
   .is_nonempty_string(x) && grepl("[А-Яа-яЁё]", x, perl = TRUE)
 }
@@ -142,7 +152,7 @@ validate_news_response <- function(parsed, n_expected = NULL, report_language = 
     }
     req_i <- c(
       "title", "date", "what_happened", "why_it_matters_for_sovereign_risk",
-      "topic_category", "scores", "composite_rank", "sources", "origin", "tags",
+      "event_stages", "topic_category", "scores", "composite_rank", "sources", "origin", "tags",
       "notes_on_evidence_quality"
     )
     miss_i <- setdiff(req_i, names(it))
@@ -158,8 +168,61 @@ validate_news_response <- function(parsed, n_expected = NULL, report_language = 
         push("%s.title must be in Russian (must include Cyrillic).", pref)
       }
     }
-    if (!is.character(it$date) || length(it$date) != 1L || is.na(it$date)) {
+    if (!.is_scalar_string(it$date)) {
       push("%s.date must be a string.", pref)
+    }
+    est <- it$event_stages
+    if (!is.list(est)) {
+      push("%s.event_stages must be an array.", pref)
+    } else {
+      n_stages <- length(est)
+      if (n_stages < 1L) {
+        push("%s.event_stages must contain at least one stage.", pref)
+      }
+      stage_dates <- rep("", n_stages)
+      stage_date_known <- rep(FALSE, n_stages)
+      stage_date_iso <- rep(FALSE, n_stages)
+      for (m in seq_len(n_stages)) {
+        st <- est[[m]]
+        if (!is.list(st)) {
+          push("%s.event_stages[%d] must be an object.", pref, m)
+          next
+        }
+        dt <- st$date
+        sg <- st$stage
+        if (!.is_scalar_string(dt)) {
+          push("%s.event_stages[%d].date must be a string.", pref, m)
+        } else {
+          stage_dates[m] <- dt
+          if (nzchar(dt)) {
+            stage_date_known[m] <- TRUE
+            if (!.is_iso_date_string(dt)) {
+              push("%s.event_stages[%d].date must be ISO YYYY-MM-DD or empty.", pref, m)
+            } else {
+              stage_date_iso[m] <- TRUE
+            }
+          }
+        }
+        if (!.is_nonempty_string(sg)) {
+          push("%s.event_stages[%d].stage must be a non-empty string.", pref, m)
+        }
+      }
+      known_iso_dates <- stage_dates[stage_date_known & stage_date_iso]
+      if (length(known_iso_dates) >= 2L) {
+        parsed_stage_dates <- as.Date(known_iso_dates)
+        if (is.unsorted(parsed_stage_dates, strictly = FALSE)) {
+          push("%s.event_stages must be ordered chronologically from earliest to latest.", pref)
+        }
+      }
+      if (length(known_iso_dates) >= 1L) {
+        latest_stage_date <- as.character(max(as.Date(known_iso_dates)))
+        item_date <- as.character(it$date)[1L]
+        if (!nzchar(item_date)) {
+          push("%s.date must match the latest event_stages date when stage dates are known.", pref)
+        } else if (.is_iso_date_string(item_date) && !identical(item_date, latest_stage_date)) {
+          push("%s.date must match the latest event_stages date (%s).", pref, latest_stage_date)
+        }
+      }
     }
     if (!.is_nonempty_string(it$what_happened)) push("%s.what_happened must be a non-empty string.", pref)
     if (!.is_nonempty_string(it$why_it_matters_for_sovereign_risk)) {
