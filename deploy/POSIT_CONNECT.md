@@ -110,6 +110,7 @@ Do **not** add patterns that exclude `R/` or `R/config.R`.
 
 | Symptom | What to try |
 |----|----|
+| **`The shiny package was not found`**; log shows only ~17 small packages and `shiny version: (none)` | **`renv.lock` was incomplete** (missing `shiny`, `bslib`, `httr2`, etc.). Locally: `renv::restore()` then `renv::snapshot()`, commit the updated `renv.lock`, republish. In the publish dialog, use **renv lockfile** / full dependency install — not “current environment” if that env lacks Shiny. Check `renv.lock` contains `"Package": "shiny"`. |
 | `could not find function "news_count_limits"` | Publish from project root; `app.R` must `source("R/config.R")` before `R/app_ui.R`. Run `Rscript archive/scripts/verify_shiny_entrypoint.R` locally. |
 | Key missing on server | Confirm variable name is exactly `OPENAI_API_KEY` on content **Vars**; restart app. |
 | HTTP 429 / timeout | Reduce **N** or date range; tune `OPENAI_TIMEOUT_SEC` / `OPENAI_MAX_RETRIES`. |

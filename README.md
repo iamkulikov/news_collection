@@ -1,16 +1,16 @@
 # Country Risk News Finder
 
-**Structured country-news briefs for sovereign risk work — built in R, not assembled by hand.**
+**Structured country-news briefs for sovereign risk work — built using LLMs and R, not assembled by hand.**
 
 Personal research app: one run turns a country, period, and topic set into a ranked, source-linked brief (RUS/ENG), with JSON/CSV/DOCX export. The focus is the **analytical workflow** (coverage, ranking, evidence, repeatability); the stack exists to make that workflow fast and auditable.
 
-![App screenshot](archive/assets/screen1.jpg)
+![App screenshot](assets/screen1.jpg)
 
 ## Why it exists
 
 Country and sovereign risk analysis needs consistent news intake: comparable items, explicit sources, and ranking that reflects **credit relevance**, not just headlines. This tool automates collection and structuring so time goes to judgment, not copy-paste and reformatting.
 
-## What you get
+## Features
 
 -   **Country-aware search** — names, ISO2/ISO3\
 -   **Controlled window & topics** — macro, external, institutions, follow-up lines, etc.\
@@ -22,7 +22,7 @@ Country and sovereign risk analysis needs consistent news intake: comparable ite
 ## How it’s built (automation, not a black box)
 
 | Layer | Choice |
-|----|----|
+|------------------------------------|------------------------------------|
 | App | R · Shiny · bslib |
 | Model | OpenAI Responses API + web search (`httr2`) |
 | Quality | JSON schema validation, retry/repair, runtime tests in `archive/` |
